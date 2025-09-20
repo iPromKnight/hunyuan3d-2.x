@@ -50,16 +50,48 @@ if (-not $onWindows) {
     return
 }
 
-# 2) Require uv
+$uvCmd = "uv"  # default
+
+# 2) Require uv (auto-install if missing, support both Links and Packages paths)
+$uvCmd = "uv"
+
 if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-  Write-Host "❌ 'uv' command not found. Install UV: https://docs.astral.sh/uv/getting-started/installation"
-  return
+    Write-Host "[..] 'uv' not found, attempting to install via winget..."
+
+    try {
+        winget install --id=astral-sh.uv -e --accept-source-agreements --accept-package-agreements
+    }
+    catch {
+        Write-Host "❌ Failed to run winget install for uv. Please install manually: https://docs.astral.sh/uv/getting-started/installation"
+        return
+    }
+
+    # Look for uv.exe in known locations
+    $linkPath = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\uv.exe"
+    $pkgPath  = Get-ChildItem -Path (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages") -Recurse -Filter "uv.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if (Test-Path $linkPath) {
+        $uvCmd = $linkPath
+        $env:PATH = "$($env:LOCALAPPDATA)\Microsoft\WinGet\Links;$env:PATH"
+        Write-Host "[OK] 'uv' installed successfully (using Links shim)"
+    }
+    elseif ($pkgPath) {
+        $uvCmd = $pkgPath.FullName
+        Write-Host "[OK] 'uv' installed successfully (using package path)"
+    }
+    else {
+        Write-Host "❌ 'uv' still not found after attempted install. Please restart your shell or install manually."
+        return
+    }
 }
+
+# From here on, use $uvCmd instead of hardcoding "uv"
+& $uvCmd --version
 
 # 3) Ensure a venv exists
 if (-not (Test-Path ".\.venv")) {
   Write-Host "[..] Creating virtual environment..."
-  uv venv --python=$Python
+  & $uvCmd venv --python=$Python
 }
 
 # Path to the venv's Python
@@ -83,7 +115,7 @@ if missing:
 "@
 
 $depsOk = $true
-& uv run --python "$VenvPython" python -c $depsCode | Out-Null
+& $uvCmd run --python "$VenvPython" python -c $depsCode | Out-Null
 if ($LASTEXITCODE -ne 0) { $depsOk = $false }
 
 if ($depsOk) {
@@ -95,18 +127,18 @@ if ($depsOk) {
   $indexUrl = if ($Cuda -eq "cpu") { "https://download.pytorch.org/whl/cpu" } else { "https://download.pytorch.org/whl/$Cuda" }
 
   # Install pinned torch trio
-  & uv pip install --python "$VenvPython" --index-url $indexUrl `
+  & $uvCmd pip install --python "$VenvPython" --index-url $indexUrl `
     torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0
 
   # Then install the rest
-  & uv pip install --python "$VenvPython" -r (Join-Path $PSScriptRoot "requirements.txt")
+  & $uvCmd pip install --python "$VenvPython" -r (Join-Path $PSScriptRoot "requirements.txt")
 
   Write-Host "[OK] Required packages installed"
 }
 
 # 5) Run the app in foreground so Ctrl+C works
 Write-Host "🚀 Setup complete - Starting PromGen..."
-& uv run --python "$VenvPython" `
+& $uvCmd run --python "$VenvPython" `
   python gradio_app.py `
   --enable_flashvdm `
   --mc_algo=mc `
