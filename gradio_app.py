@@ -26,6 +26,10 @@ pipeline_lock = threading.Lock()
 MAX_SEED = int(1e7)
 DEFAULT_EXPORT_FMT = "stl"
 AUTO_LOADED = False
+MAX_OCTREE = 524
+MAX_INFERENCE_STEPS = 60
+SHOW_ADVANCED = False
+DEFAULT_MODEL_KEY = "v2.0 (turbo)"
 MODEL_CHOICES = {
     "v2.0 (standard)": {
         "model_path": "tencent/Hunyuan3D-2",
@@ -40,17 +44,15 @@ MODEL_CHOICES = {
         "subfolder": "hunyuan3d-dit-v2-1"
     }
 }
-DEFAULT_MODEL_KEY = "v2.0 (turbo)"
 BACKEND = None
 i23d_worker = None
 
-if sys.platform == "darwin":
-    import warnings
-    warnings.filterwarnings(
-        "ignore",
-        message=".*multidimensional indexing is deprecated.*",
-        category=UserWarning
-    )
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message=".*is deprecated.*",
+    category=UserWarning
+)
 
 class _Backend:
     def __init__(self, family: str):
@@ -726,7 +728,7 @@ def build_app():
                                                       min_width=100, elem_classes='mv-image')
 
                 with gr.Row():
-                    btn = gr.Button(value='Generate Shape', variant='primary', min_width=120)
+                    btn_generate_shape = gr.Button(value='Generate Shape', variant='primary', min_width=120)
 
                 with gr.Group():
                     file_out = gr.File(label="Generated Mesh (.stl)")
@@ -744,15 +746,18 @@ def build_app():
                         min_width=100,
                     )
                     with gr.Row():
-                        num_steps = gr.Slider(maximum=100,
+                        num_steps = gr.Slider(maximum=MAX_INFERENCE_STEPS,
                                               minimum=1,
                                               value=30,
                                               step=1, label='Inference Steps')
-                        octree_resolution = gr.Slider(maximum=512, minimum=16, value=256, label='Octree Resolution')
+                        octree_resolution = gr.Slider(maximum=MAX_OCTREE, minimum=16, value=256, label='Octree Resolution')
                     with gr.Row():
-                        cfg_scale = gr.Number(value=5.0, label='Guidance Scale', min_width=100, visible=False)
+                        cfg_scale = gr.Number(value=5.0, label='Guidance Scale', min_width=100)
                         num_chunks = gr.Slider(maximum=5_000_000, minimum=1_000, value=8_000,
-                                               label='Number of Chunks', min_width=100, visible=False)
+                                               label='Number of Chunks', min_width=100, visible=SHOW_ADVANCED)
+                    with gr.Row():
+                        btn_shutdown = gr.Button(value='Shutdown', variant='secondary', min_width=120)
+                                        
 
             with gr.Column(scale=6):
                 with gr.Tabs(selected='gen_mesh_panel') as tabs_output:
@@ -808,7 +813,7 @@ def build_app():
             outputs=[load_status, title_html_box, num_steps, current_model_html, change_model_panel, load_status_inline],
         )
 
-        btn.click(
+        btn_generate_shape.click(
             shape_generation,
             inputs=[
                 caption,
@@ -835,6 +840,12 @@ def build_app():
             outputs=[html_gen_mesh],
         )
 
+        btn_shutdown.click(
+            lambda: os._exit(0),  # pylint: disable=protected-access
+            [],
+            []
+        )
+
     return demo
 
 # -----------------------
@@ -853,11 +864,17 @@ if __name__ == '__main__':
     parser.add_argument('--enable_flashvdm', action='store_true')
     parser.add_argument('--compile', action='store_true')
     parser.add_argument('--low_vram_mode', action='store_true', default=True)
+    parser.add_argument('--advanced', action='store_true', default=False)
     args = parser.parse_args()
     args.model_path = ""
     args.subfolder  = ""
 
     print(f"Args: {args}")
+
+    if args.advanced:
+        SHOW_ADVANCED = True
+        MAX_INFERENCE_STEPS = 100
+        MAX_OCTREE = 1024
 
     # Device auto-detect for macs
     if args.device is None:
